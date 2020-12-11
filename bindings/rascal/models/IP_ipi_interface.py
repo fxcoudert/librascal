@@ -42,7 +42,7 @@ class IPICalculator(BaseIO):
         self.model = load_obj(model_json)
         self.representation = self.model.get_representation_calculator()
         self.template_filename = structure_template
-        self.atoms_template = ase.io.read(structure_template)
+        self.atoms = ase.io.read(structure_template)
         self.manager = None
         self.matrix_indices_in_voigt_notation = [
             (0, 0),
