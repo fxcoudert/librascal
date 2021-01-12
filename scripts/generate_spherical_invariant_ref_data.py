@@ -171,6 +171,10 @@ def main(json_dump, save_kernel):
     # ------------------------------------------nu=3-----------------------------#
 
     frames = read(os.path.join(inputs_path, "water_rotations.xyz"), ":" + str(nstr))
+    # put in an arbitrary cell which is large enough
+    for frame in frames:
+        frame.cell = [100, 100, 100]
+        frame.center()
     species = set([atom for frame in frames for atom in frame.get_atomic_numbers()])
     nspecies = len(species)
     ncen = np.cumsum([len(frame) for frame in frames])[-1]

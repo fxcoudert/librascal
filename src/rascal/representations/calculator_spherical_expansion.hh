@@ -75,17 +75,7 @@ namespace rascal {
      * List of possible usages of interpolator. Currently only full usage
      * or no usage is allowed, but a hybrid could be added in the future.
      */
-    enum class OptimizationType { None, Interpolator, End_ };
-
-    /**
-     * Combines radial contribution parameters to one unique value.
-     */
-    constexpr size_t
-    combine_to_radial_contribution_type(RadialBasisType basis_type,
-                                        AtomicSmearingType smearing_type,
-                                        OptimizationType opt_type) {
-      return internal::combine_enums(basis_type, smearing_type, opt_type);
-    }
+    enum class OptimizationType { None, Spline, End_ };
 
     /**
      * Base class for the specification of the atomic smearing.
@@ -919,7 +909,7 @@ namespace rascal {
      * parameters different member variables have to be used and different
      * parameters can be precomputed.
      */
-    template <RadialBasisType RBT, AtomicSmearingType AST, OptimizationType IT>
+    template <RadialBasisType RBT, AtomicSmearingType AST, OptimizationType OT>
     struct RadialContributionHandler {};
 
     /* For the a constant smearing type the "a" factor can be precomputed
@@ -985,7 +975,7 @@ namespace rascal {
      */
     template <RadialBasisType RBT>
     struct RadialContributionHandler<RBT, AtomicSmearingType::Constant,
-                                     OptimizationType::Interpolator>
+                                     OptimizationType::Spline>
         : public RadialContribution<RBT> {
      public:
       using Parent = RadialContribution<RBT>;
@@ -993,7 +983,7 @@ namespace rascal {
       using Matrix_t = typename Parent::Matrix_t;
       using Matrix_Ref = typename Parent::Matrix_Ref;
       using Vector_Ref = typename Parent::Vector_Ref;
-      using Interpolator_t = math::InterpolatorMatrixUniformCubicSpline<
+      using Spline_t = math::InterpolatorMatrixUniformCubicSpline<
           math::RefinementMethod_t::Exponential>;
 
       explicit RadialContributionHandler(const Hypers_t & hypers)
@@ -1092,16 +1082,20 @@ namespace rascal {
         Matrix_t result = func(range_begin);
         int cols{static_cast<int>(result.cols())};
         int rows{static_cast<int>(result.rows())};
-        this->intp = std::make_unique<Interpolator_t>(
-            func, range_begin, range_end, accuracy, cols, rows);
+        this->intp = std::make_unique<Spline_t>(func, range_begin, range_end,
+                                                accuracy, cols, rows);
       }
 
       double get_interpolator_accuracy(const Hypers_t & optimization_hypers) {
-        if (optimization_hypers.find("accuracy") != optimization_hypers.end()) {
-          return optimization_hypers.at("accuracy").template get<double>();
+        auto spline_hypers =
+            optimization_hypers.at("Spline").template get<json>();
+        if (spline_hypers.find("accuracy") != spline_hypers.end()) {
+          return spline_hypers.at("accuracy").template get<double>();
+        } else {
+          std::stringstream err_str{};
+          err_str << "No Spline accuracy was given.";
+          throw std::logic_error(err_str.str());
         }
-        // default accuracy
-        return 1e-8;
       }
 
       double get_cutoff(const Hypers_t & hypers) {
@@ -1110,7 +1104,7 @@ namespace rascal {
       }
 
       double fac_a{};
-      std::unique_ptr<Interpolator_t> intp{};
+      std::unique_ptr<Spline_t> intp{};
     };
 
   }  // namespace internal
@@ -1302,67 +1296,18 @@ namespace rascal {
           radial_contribution_hypers.end()) {
         auto optimization_hypers =
             radial_contribution_hypers.at("optimization").get<json>();
-        if (optimization_hypers.find("type") != optimization_hypers.end()) {
-          auto intp_type_name{
-              optimization_hypers.at("type").get<std::string>()};
-          if (intp_type_name == "Spline") {
-            this->optimization_type = OptimizationType::Interpolator;
-          } else {
-            std::runtime_error("Wrongly configured optimization type. Remove "
-                               "optimization flag or use as type \'Spline\'.");
-          }
+        // Checks for all optimization args used for the computation of the
+        // spherical expansion
+        if (optimization_hypers.find("Spline") != optimization_hypers.end()) {
+          this->optimization_type = OptimizationType::Spline;
         } else {
-          std::runtime_error("Wrongly configured optimization. Please name an "
-                             "optimization type.");
+          this->optimization_type = OptimizationType::None;
         }
-      } else {  // Default case (don't use interpolator)
+      } else {
         this->optimization_type = OptimizationType::None;
       }
 
-      switch (internal::combine_to_radial_contribution_type(
-          this->radial_integral_type, this->atomic_smearing_type,
-          this->optimization_type)) {
-      case internal::combine_to_radial_contribution_type(
-          RadialBasisType::GTO, AtomicSmearingType::Constant,
-          OptimizationType::None): {
-        auto rc_shared = std::make_shared<internal::RadialContributionHandler<
-            RadialBasisType::GTO, AtomicSmearingType::Constant,
-            OptimizationType::None>>(hypers);
-        this->radial_integral = rc_shared;
-        break;
-      }
-      case internal::combine_to_radial_contribution_type(
-          RadialBasisType::GTO, AtomicSmearingType::Constant,
-          OptimizationType::Interpolator): {
-        auto rc_shared = std::make_shared<internal::RadialContributionHandler<
-            RadialBasisType::GTO, AtomicSmearingType::Constant,
-            OptimizationType::Interpolator>>(hypers);
-        this->radial_integral = rc_shared;
-        break;
-      }
-      case internal::combine_to_radial_contribution_type(
-          RadialBasisType::DVR, AtomicSmearingType::Constant,
-          OptimizationType::None): {
-        auto rc_shared = std::make_shared<internal::RadialContributionHandler<
-            RadialBasisType::DVR, AtomicSmearingType::Constant,
-            OptimizationType::None>>(hypers);
-        this->radial_integral = rc_shared;
-        break;
-      }
-      case internal::combine_to_radial_contribution_type(
-          RadialBasisType::DVR, AtomicSmearingType::Constant,
-          OptimizationType::Interpolator): {
-        auto rc_shared = std::make_shared<internal::RadialContributionHandler<
-            RadialBasisType::DVR, AtomicSmearingType::Constant,
-            OptimizationType::Interpolator>>(hypers);
-        this->radial_integral = rc_shared;
-        break;
-      }
-      default:
-        throw std::logic_error(
-            "The desired combination of parameters can not be handled.");
-        break;
-      }
+      this->set_radial_integral(hypers);
 
       auto fc_hypers = hypers.at("cutoff_function").get<json>();
       auto fc_type = fc_hypers.at("type").get<std::string>();
@@ -1474,6 +1419,15 @@ namespace rascal {
     void compute_by_radial_contribution(StructureManager & managers);
 
     /**
+     *  When the RadialBasisType has beeen already selected this function
+     *  serves for a distinction of the cases for the optimization type
+     */
+    template <internal::CutoffFunctionType FcType,
+              internal::RadialBasisType RadialType,
+              internal::AtomicSmearingType SmearingType, class StructureManager>
+    void compute_by_radial_contribution(StructureManager & managers);
+
+    /**
      * loop over a collection of manangers if it is an iterator.
      * Or just call compute_impl() if it's a single manager (see below)
      */
@@ -1502,7 +1456,7 @@ namespace rascal {
       this->compute_impl<FcType, RadialType, SmearingType, OptType>(manager);
     }
 
-    //! Compute the spherical exansion given several options
+    //! Compute the spherical expansion given several options
     template <internal::CutoffFunctionType FcType,
               internal::RadialBasisType RadialType,
               internal::AtomicSmearingType SmearingType,
@@ -1598,6 +1552,65 @@ namespace rascal {
         Property_t<StructureManager> & expansions_coefficients,
         PropertyGradient_t<StructureManager> &
             expansions_coefficients_gradient);
+
+   private:
+    void set_radial_integral(Hypers_t hypers) {
+      using internal::AtomicSmearingType;
+      using internal::RadialBasisType;
+      switch (internal::combine_enums(this->radial_integral_type,
+                                      this->atomic_smearing_type)) {
+      case internal::combine_enums(RadialBasisType::GTO,
+                                   AtomicSmearingType::Constant): {
+        this->set_radial_integral<RadialBasisType::GTO,
+                                  AtomicSmearingType::Constant>(hypers);
+        break;
+      }
+      case internal::combine_enums(RadialBasisType::DVR,
+                                   AtomicSmearingType::Constant): {
+        this->set_radial_integral<RadialBasisType::DVR,
+                                  AtomicSmearingType::Constant>(hypers);
+        break;
+      }
+      default:
+        std::basic_ostringstream<char> err_message;
+        err_message
+            << "Invalid combination of atomic smearing and radial basis ";
+        err_message << "type encountered (This is a bug.  Debug info for ";
+        err_message << "developers: "
+                    << "radial_integral_type == ";
+        err_message << static_cast<int>(this->radial_integral_type);
+        err_message << ", atomic_smearing_type == ";
+        err_message << static_cast<int>(this->atomic_smearing_type);
+        err_message << ")" << std::endl;
+        throw std::logic_error(err_message.str());
+      }
+    }
+
+    template <internal::RadialBasisType RadialType,
+              internal::AtomicSmearingType AST>
+    void set_radial_integral(Hypers_t hypers) {
+      using internal::OptimizationType;
+      switch (this->optimization_type) {
+      case (OptimizationType::None): {
+        auto rc_shared = std::make_shared<internal::RadialContributionHandler<
+            RadialType, AST, OptimizationType::None>>(hypers);
+        this->radial_integral = rc_shared;
+        break;
+      }
+      case (OptimizationType::Spline): {
+        auto rc_shared = std::make_shared<internal::RadialContributionHandler<
+            RadialType, AST, OptimizationType::Spline>>(hypers);
+        this->radial_integral = rc_shared;
+        break;
+      }
+      default:
+        std::basic_ostringstream<char> err_message;
+        err_message << "Invalid optimization type == ";
+        err_message << static_cast<int>(this->optimization_type);
+        err_message << ")" << std::endl;
+        throw std::logic_error(err_message.str());
+      }
+    }
   };
 
   // compute classes template construction
@@ -1634,42 +1647,22 @@ namespace rascal {
       StructureManager & managers) {
     // specialize based on the type of radial contribution
     using internal::AtomicSmearingType;
-    using internal::OptimizationType;
     using internal::RadialBasisType;
 
-    switch (internal::combine_to_radial_contribution_type(
-        this->radial_integral_type, this->atomic_smearing_type,
-        this->optimization_type)) {
-    case internal::combine_to_radial_contribution_type(
-        RadialBasisType::GTO, AtomicSmearingType::Constant,
-        OptimizationType::None): {
-      this->compute_loop<FcType, RadialBasisType::GTO,
-                         AtomicSmearingType::Constant, OptimizationType::None>(
+    switch (internal::combine_enums(this->radial_integral_type,
+                                    this->atomic_smearing_type)) {
+    case internal::combine_enums(RadialBasisType::GTO,
+                                 AtomicSmearingType::Constant): {
+      this->compute_by_radial_contribution<FcType, RadialBasisType::GTO,
+                                           AtomicSmearingType::Constant>(
           managers);
       break;
     }
-    case internal::combine_to_radial_contribution_type(
-        RadialBasisType::GTO, AtomicSmearingType::Constant,
-        OptimizationType::Interpolator): {
-      this->compute_loop<FcType, RadialBasisType::GTO,
-                         AtomicSmearingType::Constant,
-                         OptimizationType::Interpolator>(managers);
-      break;
-    }
-    case internal::combine_to_radial_contribution_type(
-        RadialBasisType::DVR, AtomicSmearingType::Constant,
-        OptimizationType::None): {
-      this->compute_loop<FcType, RadialBasisType::DVR,
-                         AtomicSmearingType::Constant, OptimizationType::None>(
+    case internal::combine_enums(RadialBasisType::DVR,
+                                 AtomicSmearingType::Constant): {
+      this->compute_by_radial_contribution<FcType, RadialBasisType::DVR,
+                                           AtomicSmearingType::Constant>(
           managers);
-      break;
-    }
-    case internal::combine_to_radial_contribution_type(
-        RadialBasisType::DVR, AtomicSmearingType::Constant,
-        OptimizationType::Interpolator): {
-      this->compute_loop<FcType, RadialBasisType::DVR,
-                         AtomicSmearingType::Constant,
-                         OptimizationType::Interpolator>(managers);
       break;
     }
     default:
@@ -1689,7 +1682,33 @@ namespace rascal {
       err_message << ")" << std::endl;
       throw std::logic_error(err_message.str());
     }
-  }  // namespace rascal
+  }
+
+  template <internal::CutoffFunctionType FcType,
+            internal::RadialBasisType RadialType,
+            internal::AtomicSmearingType SmearingType, class StructureManager>
+  void CalculatorSphericalExpansion::compute_by_radial_contribution(
+      StructureManager & managers) {
+    using internal::OptimizationType;
+    switch (this->optimization_type) {
+    case (OptimizationType::None): {
+      this->compute_loop<FcType, RadialType, SmearingType,
+                         OptimizationType::None>(managers);
+      break;
+    }
+    case (OptimizationType::Spline): {
+      this->compute_loop<FcType, RadialType, SmearingType,
+                         OptimizationType::Spline>(managers);
+      break;
+    }
+    default:
+      std::basic_ostringstream<char> err_message;
+      err_message << "Invalid optimization type == ";
+      err_message << static_cast<int>(this->optimization_type);
+      err_message << ")" << std::endl;
+      throw std::logic_error(err_message.str());
+    }
+  }
 
   /**
    * Compute the spherical expansion

@@ -59,9 +59,10 @@ def dump_reference_json():
         os.path.join(read_inputs_path, "CaCrP2O7_mvc-11955_symmetrized.json"),
         os.path.join(read_inputs_path, "small_molecule.json"),
     ]
-    optimization_args = [
-        {"type": "None", "accuracy": 1e-8},
-        {"type": "Spline", "accuracy": 1e-8},
+    
+    optimization = [
+        dict(),
+        dict(Spline=dict(accuracy=1e-8)),
     ]
     data = dict(
         filenames=fns_to_write,
@@ -89,9 +90,9 @@ def dump_reference_json():
                 cutoff_smooth_widths,
                 radial_basis,
                 cutoff_function_types,
-                optimization_args,
+                optimization,
             ):
-                frames = read(fn)
+                frames = [read(fn)]
                 if cutoff_function_type == "RadialScaling":
                     cutoff_function_parameters = dict(
                         rate=1, scale=cutoff * 0.5, exponent=3
@@ -109,7 +110,7 @@ def dump_reference_json():
                     "cutoff_function_parameters": cutoff_function_parameters,
                     "gaussian_sigma_constant": gaussian_sigma,
                     "radial_basis": rad_basis,
-                    "optimization_args": opt_args,
+                    "optimization": opt_args,
                 }
 
                 sph_expn = SphericalExpansion(**hypers)

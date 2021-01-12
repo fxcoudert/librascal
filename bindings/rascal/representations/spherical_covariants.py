@@ -127,7 +127,7 @@ class SphericalCovariants(BaseIO):
         cutoff_function_type="ShiftedCosine",
         normalize=True,
         radial_basis="GTO",
-        optimization_args={},
+        optimization=dict(),
         soap_type="LambdaSpectrum",
         inversion_symmetry=True,
         lam=0,
@@ -163,29 +163,24 @@ class SphericalCovariants(BaseIO):
             type=gaussian_sigma_type,
             gaussian_sigma=dict(value=gaussian_sigma_constant, unit="AA"),
         )
-        self.optimization_args = deepcopy(optimization_args)
-        if "type" in optimization_args:
-            if optimization_args["type"] == "Spline":
-                if "accuracy" in optimization_args:
-                    accuracy = optimization_args["accuracy"]
-                else:
-                    accuracy = 1e-5
-                    print(
-                        "No accuracy for spline optimization was given. Switching to default accuracy {:.0e}.".format(
-                            accuracy
-                        )
-                    )
-                optimization_args = {"type": "Spline", "accuracy": accuracy}
-            elif optimization_args["type"] == "None":
-                optimization_args = dict({"type": "None"})
-            else:
+        optimization = deepcopy(optimization)
+        # check supported optimization keys
+        # TODO make global
+        supported_optimization = ["Spline"]
+        for key in optimization.keys():
+            if key not in supported_optimization:
+                print(f"Warning: Optimization argument {key} is not supported and therefore ignored.")
+        if "Spline" in optimization:
+            if "accuracy" not in optimization["Spline"]:
+                accuracy = 1e-8
                 print(
-                    "Optimization type is not known. Switching to no" " optimization."
+                    "Info: No accuracy for spline optimization was given. Switching to default accuracy {:.0e}.".format(
+                        accuracy
+                    )
                 )
-                optimization_args = dict({"type": "None"})
-        else:
-            optimization_args = dict({"type": "None"})
-        radial_contribution = dict(type=radial_basis, optimization=optimization_args)
+                optimization["Spline"] = {"accuracy": accuracy}
+
+        radial_contribution = dict(type=radial_basis, optimization=optimization)
         radial_contribution = dict(
             type=radial_basis,
         )

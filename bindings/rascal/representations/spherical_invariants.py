@@ -104,10 +104,10 @@ class SphericalInvariants(BaseIO):
         Whether to normalize so that the kernel between identical environments
         is 1.  Default and highly recommended: True.
 
-    optimization_args : dict
+    optimization : dict
         Additional arguments for optimization.
         Currently spline optimization for the radial basis function is available
-        Recommended settings if used {"type":"Spline", "accuracy": 1e-5}
+        Recommended settings if used {"Spline": {"accuracy": 1e-8}}
 
     expansion_by_species_method : string
         Specifies the how the species key of the invariant are set-up.
@@ -193,7 +193,7 @@ class SphericalInvariants(BaseIO):
         inversion_symmetry=True,
         radial_basis="GTO",
         normalize=True,
-        optimization_args={},
+        optimization=dict(),
         expansion_by_species_method="environment wise",
         global_species=None,
         compute_gradients=False,
@@ -240,30 +240,23 @@ class SphericalInvariants(BaseIO):
             type=gaussian_sigma_type,
             gaussian_sigma=dict(value=gaussian_sigma_constant, unit="AA"),
         )
-        self.optimization_args = deepcopy(optimization_args)
-        if "type" in optimization_args:
-            if optimization_args["type"] == "Spline":
-                if "accuracy" in optimization_args:
-                    accuracy = optimization_args["accuracy"]
-                else:
-                    accuracy = 1e-5
-                    print(
-                        "No accuracy for spline optimization was given. Switching to default accuracy {:.0e}.".format(
-                            accuracy
-                        )
-                    )
-                optimization_args = {"type": "Spline", "accuracy": accuracy}
-            elif optimization_args["type"] == "None":
-                optimization_args = dict({"type": "None"})
-            else:
+        optimization = deepcopy(optimization)
+        # check supported optimization keys
+        supported_optimization = ["Spline"]
+        for key in optimization.keys():
+            if key not in supported_optimization:
+                print(f"Warning: Optimization argument {key} is not supported and therefore ignored.")
+        if "Spline" in optimization:
+            if "accuracy" not in optimization["Spline"]:
+                accuracy = 1e-8
                 print(
-                    "Optimization type is not known. Switching to no" " optimization."
+                    "Info: No accuracy for spline optimization was given. Switching to default accuracy {:.0e}.".format(
+                        accuracy
+                    )
                 )
-                optimization_args = dict({"type": "None"})
-        else:
-            optimization_args = dict({"type": "None"})
+                optimization["Spline"] = {"accuracy": accuracy}
 
-        radial_contribution = dict(type=radial_basis, optimization=optimization_args)
+        radial_contribution = dict(type=radial_basis, optimization=optimization)
 
         self.update_hyperparameters(
             cutoff_function=cutoff_function,
@@ -458,7 +451,7 @@ class SphericalInvariants(BaseIO):
             gaussian_sigma_constant=gaussian_density["gaussian_sigma"]["value"],
             cutoff_function_type=cutoff_function["type"],
             radial_basis=radial_contribution["type"],
-            optimization_args=self.optimization_args,
+            optimization=radial_contribution['optimization'],
             cutoff_function_parameters=self.cutoff_function_parameters,
         )
         if "coefficient_subselection" in self.hypers:
