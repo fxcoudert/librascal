@@ -242,7 +242,7 @@ class SphericalInvariants(BaseIO):
         )
         optimization = deepcopy(optimization)
         # check supported optimization keys
-        supported_optimization = ["Spline"]
+        supported_optimization = ["Spline", "RadialDimReduction"]
         for key in optimization.keys():
             if key not in supported_optimization:
                 print(f"Warning: Optimization argument {key} is not supported and therefore ignored.")

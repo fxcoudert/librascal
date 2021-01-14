@@ -72,10 +72,15 @@ namespace rascal {
     enum class AtomicSmearingType { Constant, PerSpecies, Radial, End_ };
 
     /**
-     * List of possible usages of interpolator. Currently only full usage
-     * or no usage is allowed, but a hybrid could be added in the future.
+     * List of possible usages of optimization types
      */
-    enum class OptimizationType { None, Spline, End_ };
+    enum class OptimizationType {
+      None,
+      Spline,
+      RadialDimReduction,
+      RadialDimReductionSpline,
+      End_
+    };
 
     /**
      * Base class for the specification of the atomic smearing.
@@ -218,14 +223,21 @@ namespace rascal {
       using Matrix_Ref = typename Eigen::Ref<const Matrix_t>;
       using Vector_Ref = typename Eigen::Ref<const Vector_t>;
 
-      //! Pure Virtual Function to set hyperparameters of the cutoff function
+      //! Pure virtual function to set hyperparameters of the cutoff function
       virtual void set_hyperparameters(const Hypers_t &) = 0;
+
+      /*
+       * Pure virtual function to initialize all Eigen matrices/vectors
+       * dependend on max_radial and max_angular.
+       */
+      virtual void init_matrices() = 0;
 
       virtual void precompute() = 0;
       //! define the contribution from the central atom to the expansion
       template <AtomicSmearingType AST, size_t Order, size_t Layer>
       Vector_Ref
-      compute_center_contribution(ClusterRefKey<Order, Layer> & /*center*/) {
+      compute_center_contribution(ClusterRefKey<Order, Layer> & /*center*/,
+                                  int /*center_type*/) {
         throw std::runtime_error("This method is pure virtual and should be "
                                  "implemented in a derived class.");
         return Vector_Ref(Vector_t::Zero());
@@ -234,7 +246,8 @@ namespace rascal {
       template <AtomicSmearingType AST, size_t Order, size_t Layer>
       Matrix_Ref compute_neighbour_contribution(
           const double /*distance*/,
-          const ClusterRefKey<Order, Layer> & /*pair*/) {
+          const ClusterRefKey<Order, Layer> & /*pair*/,
+          int /*neighbour_type*/) {
         throw std::runtime_error("This method is pure virtual and should be "
                                  "implemented in a derived class.");
         return Matrix_Ref(Matrix_t::Zero());
@@ -271,9 +284,10 @@ namespace rascal {
        * the central atom
        */
       template <size_t Order, size_t Layer>
-      Matrix_Ref compute_neighbour_derivative(
-          const double /*distance*/,
-          const ClusterRefKey<Order, Layer> & /*pair*/) {
+      Matrix_Ref
+      compute_neighbour_derivative(const double /*distance*/,
+                                   const ClusterRefKey<Order, Layer> & /*pair*/,
+                                   int /*neighbour_type*/) {
         throw std::runtime_error("This method is pure virtual and should be "
                                  "implemented in a derived class");
         return Matrix_Ref(Matrix_t::Zero());
@@ -311,7 +325,6 @@ namespace rascal {
       // Constructor
       explicit RadialContribution(const Hypers_t & hypers) {
         this->set_hyperparameters(hypers);
-        this->precompute();
       }
       // Destructor
       virtual ~RadialContribution() = default;
@@ -342,27 +355,13 @@ namespace rascal {
         this->max_radial = hypers.at("max_radial");
         this->max_angular = hypers.at("max_angular");
 
-        if (hypers.find("compute_gradients") != hypers.end()) {
+        if (hypers.count("compute_gradients")) {
           this->compute_gradients = hypers.at("compute_gradients").get<bool>();
         } else {  // Default false (don't compute gradients)
           this->compute_gradients = false;
         }
 
-        // init size of the member data
-        // both precomputed quantities and actual expansion coefficients
-        this->radial_ortho_matrix.resize(this->max_radial, this->max_radial);
-        this->ortho_norm_matrix.resize(this->max_radial, this->max_radial);
-        this->fac_b.resize(this->max_radial, 1);
-        this->a_b_l_n.resize(this->max_radial, this->max_angular + 1);
-        this->distance_fac_a_l.resize(this->max_angular + 1);
-        this->radial_norm_factors.resize(this->max_radial, 1);
-        this->radial_n_factors.resize(this->max_radial);
-        this->radial_sigmas.resize(this->max_radial, 1);
-        this->radial_integral_neighbour.resize(this->max_radial,
-                                               this->max_angular + 1);
-        this->radial_integral_center.resize(this->max_radial);
-        this->radial_neighbour_derivative.resize(this->max_radial,
-                                                 this->max_angular + 1);
+        this->init_matrices();
 
         // find the cutoff radius of the representation
         auto fc_hypers = hypers.at("cutoff_function").get<json>();
@@ -385,6 +384,24 @@ namespace rascal {
         }
       }
 
+      // initialize Eigen matrices/vectors, contains both
+      // precomputed quantities and actual expansion coefficients
+      void init_matrices() override {
+        this->radial_ortho_matrix.resize(this->max_radial, this->max_radial);
+        this->ortho_norm_matrix.resize(this->max_radial, this->max_radial);
+        this->fac_b.resize(this->max_radial, 1);
+        this->a_b_l_n.resize(this->max_radial, this->max_angular + 1);
+        this->distance_fac_a_l.resize(this->max_angular + 1);
+        this->radial_norm_factors.resize(this->max_radial, 1);
+        this->radial_n_factors.resize(this->max_radial);
+        this->radial_sigmas.resize(this->max_radial, 1);
+        this->radial_integral_neighbour.resize(this->max_radial,
+                                               this->max_angular + 1);
+        this->radial_integral_center.resize(this->max_radial);
+        this->radial_neighbour_derivative.resize(this->max_radial,
+                                                 this->max_angular + 1);
+      }
+
       void precompute() override {
         this->precompute_radial_sigmas();
         this->precompute_radial_overlap();
@@ -397,7 +414,7 @@ namespace rascal {
       /**
        * Define the contribution from a neighbour atom to the expansion
        * without requiring a cluster object so it can be used with the
-       * interpolator.
+       * spline.
        */
       template <AtomicSmearingType AST>
       Matrix_t compute_contribution(const double distance, const double sigma) {
@@ -447,7 +464,8 @@ namespace rascal {
       //! define the contribution from the central atom to the expansion
       template <AtomicSmearingType AST, size_t Order, size_t Layer>
       Vector_Ref
-      compute_center_contribution(ClusterRefKey<Order, Layer> & center) {
+      compute_center_contribution(ClusterRefKey<Order, Layer> & center,
+                                  int /*center_type*/) {
         using math::pow;
 
         auto smearing{downcast_atomic_smearing<AST>(this->atomic_smearing)};
@@ -541,8 +559,10 @@ namespace rascal {
 
       //! Compute the radial derivative of the neighbour contribution
       template <size_t Order, size_t Layer>
-      Matrix_Ref compute_neighbour_derivative(
-          const double distance, const ClusterRefKey<Order, Layer> & /*pair*/) {
+      Matrix_Ref
+      compute_neighbour_derivative(const double distance,
+                                   const ClusterRefKey<Order, Layer> & /*pair*/,
+                                   int /*neighbour_type*/) {
         using math::PI;
         using math::pow;
         using std::sqrt;
@@ -564,29 +584,37 @@ namespace rascal {
         return Matrix_Ref(this->radial_neighbour_derivative);
       }
 
-      void finalize_radial_integral() {
-        this->radial_integral_neighbour = this->ortho_norm_matrix.transpose() *
-                                          this->radial_integral_neighbour;
-      }
-
+      // Can be used after `compute_center_contribution` to finalize the
+      // coefficients within the neighbour loop
       void finalize_radial_integral_center() {
         this->radial_integral_center =
             this->ortho_norm_matrix.transpose() * this->radial_integral_center;
       }
 
+      // Can be used after `compute_neighbour_contribution` to finalize the
+      // coefficients within the neighbour loop
+      void finalize_radial_integral_neighbour() {
+        this->radial_integral_neighbour = this->ortho_norm_matrix.transpose() *
+                                          this->radial_integral_neighbour;
+      }
+
+      // used within the computation of the sperical expanison to apply global
+      // operations after the neighbour loop
       template <typename Coeffs>
       void finalize_coefficients(Coeffs & coefficients) const {
         coefficients.lhs_dot(this->ortho_norm_matrix);
       }
 
-      template <int NDims, typename Coeffs, typename Center>
-      void finalize_coefficients_der(Coeffs & coefficients_gradient,
-                                     Center & center) const {
-        for (auto neigh : center.pairs_with_self_pair()) {
-          auto & coefficients_neigh_gradient = coefficients_gradient[neigh];
-          coefficients_neigh_gradient.template lhs_dot_der<NDims>(
-              this->ortho_norm_matrix);
-        }  // for (neigh : center)
+      void finalize_neighbour_derivative() {
+        this->radial_neighbour_derivative =
+            this->ortho_norm_matrix.transpose() *
+            this->radial_neighbour_derivative;
+      }
+
+      template <int NDims, typename Coeffs>
+      void finalize_neighbour_derivative(Coeffs & coefficients_neigh_gradient) {
+        coefficients_neigh_gradient.template lhs_dot_der<NDims>(
+            this->ortho_norm_matrix);
       }
 
       /** Compute common prefactors for the radial Gaussian basis functions */
@@ -711,7 +739,6 @@ namespace rascal {
       //! Constructor
       explicit RadialContribution(const Hypers_t & hypers) {
         this->set_hyperparameters(hypers);
-        this->precompute();
       }
       //! Destructor
       virtual ~RadialContribution() = default;
@@ -743,22 +770,13 @@ namespace rascal {
         this->max_radial = hypers.at("max_radial");
         this->max_angular = hypers.at("max_angular");
 
-        if (hypers.find("compute_gradients") != hypers.end()) {
+        if (hypers.count("compute_gradients")) {
           this->compute_gradients = hypers.at("compute_gradients").get<bool>();
         } else {  // Default false (don't compute gradients)
           this->compute_gradients = false;
         }
 
-        // init size of the member data
-        // both precomputed quantities and actual expansion coefficients
-        this->legendre_radial_factor.resize(this->max_radial);
-        this->legendre_points.resize(this->max_radial);
-
-        this->radial_integral_neighbour.resize(this->max_radial,
-                                               this->max_angular + 1);
-        this->radial_neighbour_derivative.resize(this->max_radial,
-                                                 this->max_angular + 1);
-        this->radial_integral_center.resize(this->max_radial);
+        this->init_matrices();
 
         // find the cutoff radius of the representation
         auto fc_hypers = hypers.at("cutoff_function").get<json>();
@@ -785,6 +803,19 @@ namespace rascal {
         }
       }
 
+      // initialize Eigen matrices/vectors, contains both
+      // precomputed quantities and actual expansion coefficients
+      void init_matrices() {
+        this->legendre_radial_factor.resize(this->max_radial);
+        this->legendre_points.resize(this->max_radial);
+
+        this->radial_integral_neighbour.resize(this->max_radial,
+                                               this->max_angular + 1);
+        this->radial_neighbour_derivative.resize(this->max_radial,
+                                                 this->max_angular + 1);
+        this->radial_integral_center.resize(this->max_radial);
+      }
+
       void precompute() override {
         auto point_weight{math::compute_gauss_legendre_points_weights(
             0., this->interaction_cutoff + 3 * this->smearing,
@@ -807,7 +838,8 @@ namespace rascal {
 
       template <AtomicSmearingType AST, size_t Order, size_t Layer>
       Vector_Ref
-      compute_center_contribution(ClusterRefKey<Order, Layer> & center) {
+      compute_center_contribution(ClusterRefKey<Order, Layer> & center,
+                                  int /*center_type*/) {
         using math::pow;
 
         auto smearing{downcast_atomic_smearing<AST>(this->atomic_smearing)};
@@ -859,9 +891,10 @@ namespace rascal {
 
       //! Compute the radial derivative of the neighbour contribution
       template <size_t Order, size_t Layer>
-      Matrix_Ref compute_neighbour_derivative(
-          const double /*distance*/,
-          const ClusterRefKey<Order, Layer> & /*pair*/) {
+      Matrix_Ref
+      compute_neighbour_derivative(const double /*distance*/,
+                                   const ClusterRefKey<Order, Layer> & /*pair*/,
+                                   int /*neighbour_type*/) {
         this->radial_neighbour_derivative =
             this->legendre_radial_factor.asDiagonal() *
             this->bessel.get_gradients().matrix();
@@ -871,14 +904,16 @@ namespace rascal {
 
       void finalize_radial_integral_center() {}
 
-      void finalize_radial_integral() {}
+      void finalize_radial_integral_neighbour() {}
 
       template <typename Coeffs>
       void finalize_coefficients(Coeffs & /*coefficients*/) const {}
 
-      template <int NDims, typename Coeffs, typename Center>
-      void finalize_coefficients_der(Coeffs & /*coefficients_gradient*/,
-                                     Center & /*center*/) const {}
+      void finalize_neighbour_derivative() {}
+
+      template <int NDims, typename Coeffs>
+      void
+      finalize_neighbour_derivative(Coeffs & /*coefficients_neigh_gradient*/) {}
 
       math::ModifiedSphericalBessel bessel{};
 
@@ -926,20 +961,22 @@ namespace rascal {
 
       explicit RadialContributionHandler(const Hypers_t & hypers)
           : Parent(hypers) {
-        this->precompute_fac_a();
-        this->precompute_center_contribution();
+        this->precompute();
       }
 
       // Returns the precomputed center contribution
       template <size_t Order, size_t Layer>
-      Vector_Ref compute_center_contribution(ClusterRefKey<Order, Layer> &) {
+      Vector_Ref
+      compute_center_contribution(ClusterRefKey<Order, Layer> & /*center*/,
+                                  int /*center_type*/) {
         return Vector_Ref(this->radial_integral_center);
       }
 
       template <size_t Order, size_t Layer>
-      Matrix_Ref
-      compute_neighbour_contribution(const double distance,
-                                     const ClusterRefKey<Order, Layer> &) {
+      Matrix_Ref compute_neighbour_contribution(
+          const double distance,
+          const ClusterRefKey<Order, Layer> & /*neighbour*/,
+          int /*neighbour_type*/) {
         return Parent::compute_neighbour_contribution(distance, this->fac_a);
       }
 
@@ -950,11 +987,19 @@ namespace rascal {
       template <size_t Order, size_t Layer>
       Matrix_Ref
       compute_neighbour_derivative(const double distance,
-                                   const ClusterRefKey<Order, Layer> & pair) {
-        return Parent::compute_neighbour_derivative(distance, pair);
+                                   const ClusterRefKey<Order, Layer> & pair,
+                                   int neighbour_type) {
+        return Parent::compute_neighbour_derivative(distance, pair,
+                                                    neighbour_type);
       }
 
      protected:
+      void precompute() {
+        Parent::precompute();
+        this->precompute_fac_a();
+        this->precompute_center_contribution();
+      }
+
       void precompute_fac_a() {
         auto smearing{downcast_atomic_smearing<AtomicSmearingType::Constant>(
             this->atomic_smearing)};
@@ -971,7 +1016,7 @@ namespace rascal {
     };
 
     /* For the a constant smearing type the "a" factor can be precomputed and
-     * when using the interpolator has to be initialized and used.
+     * when using the spline has to be initialized and used.
      */
     template <RadialBasisType RBT>
     struct RadialContributionHandler<RBT, AtomicSmearingType::Constant,
@@ -1001,16 +1046,19 @@ namespace rascal {
         this->precompute();
         this->init_interpolator(range_begin, range_end, accuracy);
       }
+
       // Returns the precomputed center contribution
       template <size_t Order, size_t Layer>
-      Vector_Ref compute_center_contribution(ClusterRefKey<Order, Layer> &) {
+      Vector_Ref
+      compute_center_contribution(ClusterRefKey<Order, Layer> & /*center*/,
+                                  int /*center_type*/) {
         return Vector_Ref(this->radial_integral_center);
       }
 
       template <size_t Order, size_t Layer>
-      Matrix_Ref
-      compute_neighbour_contribution(const double distance,
-                                     const ClusterRefKey<Order, Layer> &) {
+      Matrix_Ref compute_neighbour_contribution(
+          const double distance, const ClusterRefKey<Order, Layer> & /*pair*/,
+          int /*neighbour_type*/) {
         this->radial_integral_neighbour = this->intp->interpolate(distance);
         return Matrix_Ref(this->radial_integral_neighbour);
       }
@@ -1018,7 +1066,8 @@ namespace rascal {
       template <size_t Order, size_t Layer>
       Matrix_Ref
       compute_neighbour_derivative(const double distance,
-                                   const ClusterRefKey<Order, Layer> &) {
+                                   const ClusterRefKey<Order, Layer> & /*pair*/,
+                                   int /*neighbour_type*/) {
         this->radial_neighbour_derivative =
             this->intp->interpolate_derivative(distance);
         return Matrix_Ref(this->radial_neighbour_derivative);
@@ -1026,21 +1075,22 @@ namespace rascal {
 
       /*
        * Overwriting the finalization function to empty one, since the
-       * finalization happens now in the interpolator
+       * finalization happens now in the spline
        */
       template <typename Coeffs>
       void finalize_coefficients(Coeffs & /*coefficients*/) {}
 
       /*
-       * Overwriting the finalization function of the derivative to empty one,
-       * since the finalization happens now in the interpolator
+       * Overwriting the finalization function to empty one, since the
+       * derivative of the spline is used
        */
-      template <int NDims, typename Coeffs, typename Center>
-      void finalize_coefficients_der(Coeffs & /*coefficients_gradient*/,
-                                     Center & /*center*/) const {}
+      template <int NDims, typename Coeffs>
+      void
+      finalize_neighbour_derivative(Coeffs & /*coefficients_neigh_gradient*/) {}
 
      protected:
       void precompute() override {
+        Parent::precompute();
         this->precompute_fac_a();
         this->precompute_center_contribution();
       }
@@ -1076,7 +1126,7 @@ namespace rascal {
         std::function<Matrix_t(double)> func{
             [&](const double distance) mutable {
               Parent::compute_neighbour_contribution(distance, this->fac_a);
-              Parent::finalize_radial_integral();
+              Parent::finalize_radial_integral_neighbour();
               return this->radial_integral_neighbour;
             }};
         Matrix_t result = func(range_begin);
@@ -1089,7 +1139,7 @@ namespace rascal {
       double get_interpolator_accuracy(const Hypers_t & optimization_hypers) {
         auto spline_hypers =
             optimization_hypers.at("Spline").template get<json>();
-        if (spline_hypers.find("accuracy") != spline_hypers.end()) {
+        if (spline_hypers.count("accuracy")) {
           return spline_hypers.at("accuracy").template get<double>();
         } else {
           std::stringstream err_str{};
@@ -1105,6 +1155,597 @@ namespace rascal {
 
       double fac_a{};
       std::unique_ptr<Spline_t> intp{};
+    };
+
+    /*
+     * TODO(alex) doc
+     */
+    template <RadialBasisType RBT>
+    struct RadialContributionHandler<RBT, AtomicSmearingType::Constant,
+                                     OptimizationType::RadialDimReduction>
+        : public RadialContribution<RBT> {
+     public:
+      using Parent = RadialContribution<RBT>;
+      using Hypers_t = typename Parent::Hypers_t;
+      using Matrix_Ref = typename Parent::Matrix_Ref;
+      using Vector_Ref = typename Parent::Vector_Ref;
+      using Matrix_t = math::Matrix_t;
+      using Vector_t = math::Vector_t;
+      using Spline_t = math::InterpolatorMatrixUniformCubicSpline<
+          math::RefinementMethod_t::Exponential>;
+
+      explicit RadialContributionHandler(const Hypers_t & hypers)
+          : Parent(hypers) {
+        this->set_hyperparameters(hypers);
+        this->precompute();
+      }
+
+      void set_hyperparameters(const Hypers_t & hypers) {
+        auto radial_contribution_hypers =
+            hypers.at("radial_contribution").template get<json>();
+        auto optimization_hypers =
+            radial_contribution_hypers.at("optimization").template get<json>();
+        auto radial_dim_reduction_hypers =
+            optimization_hypers.at("RadialDimReduction").template get<json>();
+        if (radial_dim_reduction_hypers.count("projection_matrices")) {
+          auto json_projection_matrices =
+              radial_dim_reduction_hypers.at("projection_matrices")
+                  .template get<std::map<
+                      std::string,
+                      std::vector<std::vector<std::vector<double>>>>>();
+          // TODO(alex) for now I assume the correct species are given,
+          // because I don't know where to get a species list,
+          // but this can cause an access error by the block sparse porperty.
+          this->n_species = json_projection_matrices.size();
+          this->n_components = this->max_radial;
+
+          if (json_projection_matrices.begin()->second.size() == 0) {
+            std::stringstream err_str{};
+            err_str << "projection_matrices should have the shape "
+                       "(max_angular+1, max_radial, expanded_max_radial)";
+            throw std::logic_error(err_str.str());
+          }
+          if (json_projection_matrices.begin()->second.at(0).size() == 0) {
+            std::stringstream err_str{};
+            err_str << "projection_matrices should have the shape "
+                       "(max_angular+1, max_radial, expanded_max_radial)";
+            throw std::logic_error(err_str.str());
+          }
+          if (json_projection_matrices.begin()->second.at(0).at(0).size() ==
+              0) {
+            std::stringstream err_str{};
+            err_str << "projection_matrices should have the shape "
+                       "(max_angular+1, max_radial, expanded_max_radial)";
+            throw std::logic_error(err_str.str());
+          }
+          // overwrite max_radial to expanded max_radial
+          this->max_radial =
+              json_projection_matrices.begin()->second.at(0).at(0).size();
+
+          // check projection matrices sizes
+          std::string species;
+          for (auto it = json_projection_matrices.begin();
+               it != json_projection_matrices.end(); ++it) {
+            species = it->first;
+            if (json_projection_matrices.at(species).size() !=
+                this->max_angular + 1) {
+              std::stringstream err_str{};
+              err_str << "Projection matrices at species=" << species
+                      << " does not match the size max_angular="
+                      << this->max_angular << " but is "
+                      << json_projection_matrices.at(species).size() << ".";
+              throw std::logic_error(err_str.str());
+            }
+            for (size_t angular_l = 0; angular_l < this->max_angular + 1;
+                 angular_l++) {
+              if (json_projection_matrices.at(species).at(angular_l).size() !=
+                  this->n_components) {
+                std::stringstream err_str{};
+                // be aware that `max_radial` in hyperparameters is
+                // this->n_components within in this class
+                err_str
+                    << "Projection matrices at species=" << species
+                    << " and angular_l=" << angular_l
+                    << " does not match the max_radial=" << this->n_components
+                    << " in hyperparameters but is "
+                    << json_projection_matrices.at(species).at(angular_l).size()
+                    << ".";
+                throw std::logic_error(err_str.str());
+              }
+              for (size_t radial_c = 0; radial_c < this->n_components;
+                   radial_c++) {
+                if (json_projection_matrices.at(species)
+                        .at(angular_l)
+                        .at(radial_c)
+                        .size() != this->max_radial) {
+                  std::stringstream err_str{};
+                  // be aware that `max_radial` in hyperparameters is
+                  // this->n_components within in this class
+                  err_str << "Projection matrices at species=" << species
+                          << ", angular_l=" << angular_l
+                          << " and max_radial=" << this->n_components
+                          << " is not consistent in expanded_max_radial="
+                          << this->max_radial
+                          << " with species=0, angular_l=0 and max_radial=0"
+                          << json_projection_matrices.at(species)
+                                 .at(angular_l)
+                                 .at(radial_c)
+                                 .size()
+                          << ".";
+                  throw std::logic_error(err_str.str());
+                }
+              }
+            }
+          }
+
+          // init projection matrices
+          Matrix_t projection_matrix{};
+          std::vector<Matrix_t> angular_projection_matrices(this->max_angular +
+                                                            1);
+          for (auto it = json_projection_matrices.begin();
+               it != json_projection_matrices.end(); ++it) {
+            species = it->first;
+            for (size_t angular_l = 0; angular_l < this->max_angular + 1;
+                 angular_l++) {
+              projection_matrix.resize(this->n_components, this->max_radial);
+              projection_matrix.setZero();
+              for (size_t radial_c = 0; radial_c < this->n_components;
+                   radial_c++) {
+                for (size_t radial_n = 0; radial_n < this->max_radial;
+                     radial_n++) {
+                  projection_matrix(radial_c, radial_n) =
+                      json_projection_matrices.at(species)
+                          .at(angular_l)
+                          .at(radial_c)
+                          .at(radial_n);
+                }
+              }
+              angular_projection_matrices.at(angular_l) = projection_matrix;
+            }
+            this->projection_matrices.insert(
+                std::pair<int, std::vector<Matrix_t>>(
+                    std::stoi(species), angular_projection_matrices));
+          }
+
+          this->init_matrices();
+        } else {
+          std::stringstream err_str{};
+          err_str << "No projection matrices were given.";
+          throw std::logic_error(err_str.str());
+        }
+        Parent::init_matrices();
+      }
+
+      void precompute() {
+        Parent::precompute();
+        this->precompute_fac_a();
+        this->precompute_center_contribution();
+      }
+
+      void init_matrices() {
+        this->reduced_radial_integral_neighbour.resize(this->n_components,
+                                                       this->max_angular + 1);
+        this->reduced_radial_integral_neighbour.setZero();
+        this->reduced_radial_neighbour_derivative.resize(this->n_components,
+                                                         this->max_angular + 1);
+        this->reduced_radial_neighbour_derivative.setZero();
+      }
+
+      // Returns the precomputed center contribution
+      template <size_t Order, size_t Layer>
+      Vector_Ref compute_center_contribution(ClusterRefKey<Order, Layer> &,
+                                             int center_type) {
+        return Vector_Ref(
+            this->reduced_radial_integral_centers.at(center_type));
+      }
+
+      template <size_t Order, size_t Layer>
+      Matrix_Ref compute_neighbour_contribution(
+          const double distance, const ClusterRefKey<Order, Layer> & /*pair*/,
+          int neighbour_type) {
+        Parent::compute_neighbour_contribution(distance, this->fac_a);
+        Parent::finalize_radial_integral_neighbour();
+        for (size_t angular_l{0}; angular_l < this->max_angular + 1;
+             ++angular_l) {
+          this->reduced_radial_integral_neighbour.col(angular_l) =
+              this->projection_matrices.at(neighbour_type).at(angular_l) *
+              this->radial_integral_neighbour.col(angular_l);
+        }
+        return Matrix_Ref(this->reduced_radial_integral_neighbour);
+      }
+
+      template <size_t Order, size_t Layer>
+      Matrix_Ref
+      compute_neighbour_derivative(const double distance,
+                                   const ClusterRefKey<Order, Layer> & pair,
+                                   int neighbour_type) {
+        Parent::compute_neighbour_derivative(distance, pair, neighbour_type);
+        Parent::finalize_neighbour_derivative();
+        for (size_t angular_l{0}; angular_l < this->max_angular + 1;
+             ++angular_l) {
+          this->reduced_radial_neighbour_derivative.col(angular_l) =
+              this->projection_matrices.at(neighbour_type).at(angular_l) *
+              this->radial_neighbour_derivative.col(angular_l);
+        }
+        return Matrix_Ref(this->reduced_radial_neighbour_derivative);
+      }
+
+      /*
+       * Overwriting the finalization function to empty one, since the
+       * finalization happens now in the per neighbour computation
+       */
+      template <typename Coeffs>
+      void finalize_coefficients(Coeffs & /*coefficients*/) {}
+
+      template <int NDims, typename Coeffs>
+      void
+      finalize_neighbour_derivative(Coeffs & /*coefficients_neigh_gradient*/) {
+        std::stringstream err_str{};
+        err_str
+            << "RadialDimReduction without Spline is not supporting gradient.";
+        throw std::runtime_error(err_str.str());
+      }
+
+     protected:
+      void precompute_fac_a() {
+        auto smearing{downcast_atomic_smearing<AtomicSmearingType::Constant>(
+            this->atomic_smearing)};
+        this->fac_a = 0.5 * pow(smearing->get_gaussian_sigma(), -2);
+      }
+
+      // Should be invoked only after the a-factor has been precomputed
+      void precompute_center_contribution() {
+        Parent::compute_center_contribution(this->fac_a);
+        Parent::finalize_radial_integral_center();
+        int species;
+        // Vector_t reduced_radial_integral_center;
+        // for (auto species_projection_matrices : this->projection_matrices) {
+        for (auto it = this->projection_matrices.begin();
+             it != this->projection_matrices.end(); ++it) {
+          species = it->first;
+          // use projection matrix at l = 0
+          this->reduced_radial_integral_centers.insert(std::pair<int, Vector_t>(
+              species, it->second.at(0) * this->radial_integral_center));
+        }
+      }
+      Matrix_t reduced_radial_integral_neighbour{};
+      Matrix_t reduced_radial_neighbour_derivative{};
+      std::map<int, Vector_t> reduced_radial_integral_centers{};
+      std::map<int, std::vector<Matrix_t>> projection_matrices{};
+      size_t n_components{};
+      size_t n_species{};
+      // 1/(2σ^2)
+      double fac_a{};
+    };
+
+    /*
+     * TODO(alex) doc
+     */
+    template <RadialBasisType RBT>
+    struct RadialContributionHandler<RBT, AtomicSmearingType::Constant,
+                                     OptimizationType::RadialDimReductionSpline>
+        : public RadialContribution<RBT> {
+     public:
+      using Parent = RadialContribution<RBT>;
+      using Hypers_t = typename Parent::Hypers_t;
+      using Matrix_Ref = typename Parent::Matrix_Ref;
+      using Vector_Ref = typename Parent::Vector_Ref;
+      using Matrix_t = math::Matrix_t;
+      using Vector_t = math::Vector_t;
+      using Spline_t = math::InterpolatorMatrixUniformCubicSpline<
+          math::RefinementMethod_t::Exponential>;
+
+      explicit RadialContributionHandler(const Hypers_t & hypers)
+          : Parent(hypers) {
+        this->set_hyperparameters(hypers);
+        this->precompute();
+        this->init_interpolator(hypers);
+      }
+
+      void set_hyperparameters(const Hypers_t & hypers) {
+        auto radial_contribution_hypers =
+            hypers.at("radial_contribution").template get<json>();
+        auto optimization_hypers =
+            radial_contribution_hypers.at("optimization").template get<json>();
+        auto radial_dim_reduction_hypers =
+            optimization_hypers.at("RadialDimReduction").template get<json>();
+        if (radial_dim_reduction_hypers.count("projection_matrices")) {
+          auto json_projection_matrices =
+              radial_dim_reduction_hypers.at("projection_matrices")
+                  .template get<std::map<
+                      std::string,
+                      std::vector<std::vector<std::vector<double>>>>>();
+          // TODO(alex) for now I assume the correct species are given,
+          // because I don't know where to get a species list,
+          // but this can cause an access error by the block sparse porperty.
+          this->n_species = json_projection_matrices.size();
+          this->n_components = this->max_radial;
+
+          if (json_projection_matrices.begin()->second.size() == 0) {
+            std::stringstream err_str{};
+            err_str << "projection_matrices should have the shape "
+                       "(max_angular+1, max_radial, expanded_max_radial)";
+            throw std::logic_error(err_str.str());
+          }
+          if (json_projection_matrices.begin()->second.at(0).size() == 0) {
+            std::stringstream err_str{};
+            err_str << "projection_matrices should have the shape "
+                       "(max_angular+1, max_radial, expanded_max_radial)";
+            throw std::logic_error(err_str.str());
+          }
+          if (json_projection_matrices.begin()->second.at(0).at(0).size() ==
+              0) {
+            std::stringstream err_str{};
+            err_str << "projection_matrices should have the shape "
+                       "(max_angular+1, max_radial, expanded_max_radial)";
+            throw std::logic_error(err_str.str());
+          }
+          // overwrite max_radial to expanded max_radial
+          this->max_radial =
+              json_projection_matrices.begin()->second.at(0).at(0).size();
+
+          // check projection matrices sizes
+          std::string species;
+          for (auto it = json_projection_matrices.begin();
+               it != json_projection_matrices.end(); ++it) {
+            species = it->first;
+            if (json_projection_matrices.at(species).size() !=
+                this->max_angular + 1) {
+              std::stringstream err_str{};
+              err_str << "Projection matrices at species=" << species
+                      << " does not match the size max_angular="
+                      << this->max_angular << " but is "
+                      << json_projection_matrices.at(species).size() << ".";
+              throw std::logic_error(err_str.str());
+            }
+            for (size_t angular_l = 0; angular_l < this->max_angular + 1;
+                 angular_l++) {
+              if (json_projection_matrices.at(species).at(angular_l).size() !=
+                  this->n_components) {
+                std::stringstream err_str{};
+                // be aware that `max_radial` in hyperparameters is
+                // this->n_components within in this class
+                err_str
+                    << "Projection matrices at species=" << species
+                    << " and angular_l=" << angular_l
+                    << " does not match the max_radial=" << this->n_components
+                    << " in hyperparameters but is "
+                    << json_projection_matrices.at(species).at(angular_l).size()
+                    << ".";
+                throw std::logic_error(err_str.str());
+              }
+              for (size_t radial_c = 0; radial_c < this->n_components;
+                   radial_c++) {
+                if (json_projection_matrices.at(species)
+                        .at(angular_l)
+                        .at(radial_c)
+                        .size() != this->max_radial) {
+                  std::stringstream err_str{};
+                  // be aware that `max_radial` in hyperparameters is
+                  // this->n_components within in this class
+                  err_str << "Projection matrices at species=" << species
+                          << ", angular_l=" << angular_l
+                          << " and max_radial=" << this->n_components
+                          << " is not consistent in expanded_max_radial="
+                          << this->max_radial
+                          << " with species=0, angular_l=0 and max_radial=0"
+                          << json_projection_matrices.at(species)
+                                 .at(angular_l)
+                                 .at(radial_c)
+                                 .size()
+                          << ".";
+                  throw std::logic_error(err_str.str());
+                }
+              }
+            }
+          }
+
+          // init projection matrices
+          Matrix_t projection_matrix{};
+          std::vector<Matrix_t> angular_projection_matrices(this->max_angular +
+                                                            1);
+          for (auto it = json_projection_matrices.begin();
+               it != json_projection_matrices.end(); ++it) {
+            species = it->first;
+            for (size_t angular_l = 0; angular_l < this->max_angular + 1;
+                 angular_l++) {
+              projection_matrix.resize(this->n_components, this->max_radial);
+              projection_matrix.setZero();
+              for (size_t radial_c = 0; radial_c < this->n_components;
+                   radial_c++) {
+                for (size_t radial_n = 0; radial_n < this->max_radial;
+                     radial_n++) {
+                  projection_matrix(radial_c, radial_n) =
+                      json_projection_matrices.at(species)
+                          .at(angular_l)
+                          .at(radial_c)
+                          .at(radial_n);
+                }
+              }
+              angular_projection_matrices.at(angular_l) = projection_matrix;
+            }
+            this->projection_matrices.insert(
+                std::pair<int, std::vector<Matrix_t>>(
+                    std::stoi(species), angular_projection_matrices));
+          }
+
+          this->init_matrices();
+        } else {
+          std::stringstream err_str{};
+          err_str << "No projection matrices were given.";
+          throw std::logic_error(err_str.str());
+        }
+        Parent::init_matrices();
+      }
+
+      void precompute() {
+        Parent::precompute();
+        this->precompute_fac_a();
+        this->precompute_center_contribution();
+      }
+
+      void init_matrices() {
+        this->reduced_radial_integral_neighbour.resize(this->n_components,
+                                                       this->max_angular + 1);
+        this->reduced_radial_integral_neighbour.setZero();
+        this->reduced_radial_neighbour_derivative.resize(this->n_components,
+                                                         this->max_angular + 1);
+        this->reduced_radial_neighbour_derivative.setZero();
+      }
+
+      // Returns the precomputed center contribution
+      template <size_t Order, size_t Layer>
+      Vector_Ref
+      compute_center_contribution(ClusterRefKey<Order, Layer> & /*center*/,
+                                  int center_type) {
+        return Vector_Ref(
+            this->reduced_radial_integral_centers.at(center_type));
+      }
+
+      template <size_t Order, size_t Layer>
+      Matrix_Ref compute_neighbour_contribution(
+          const double distance, const ClusterRefKey<Order, Layer> & /*pair*/,
+          int neighbour_type) {
+        this->radial_integral_neighbour =
+            this->intps.at(neighbour_type)->interpolate(distance);
+        return Matrix_Ref(this->radial_integral_neighbour);
+      }
+
+      template <size_t Order, size_t Layer>
+      Matrix_Ref
+      compute_neighbour_derivative(const double distance,
+                                   const ClusterRefKey<Order, Layer> & /*pair*/,
+                                   int neighbour_type) {
+        this->radial_neighbour_derivative =
+            this->intps.at(neighbour_type)->interpolate_derivative(distance);
+        return Matrix_Ref(this->radial_neighbour_derivative);
+      }
+      ///////////////////////
+
+      // template <size_t Order, size_t Layer>
+      // Matrix_Ref
+      // compute_neighbour_derivative(const double distance,
+      //                             const ClusterRefKey<Order, Layer> & pair,
+      //                             int neighbour_type) {
+      //  Parent::compute_neighbour_derivative(distance, pair, neighbour_type);
+      //  Parent::finalize_neighbour_derivative();
+      //  for (size_t angular_l{0}; angular_l < this->max_angular + 1;
+      //       ++angular_l) {
+      //    this->reduced_radial_neighbour_derivative.col(angular_l) =
+      //        this->projection_matrices.at(neighbour_type).at(angular_l) *
+      //        this->radial_neighbour_derivative.col(angular_l);
+      //  }
+      //  return Matrix_Ref(this->reduced_radial_neighbour_derivative);
+      //}
+
+      /*
+       * Overwriting the finalization function to empty one, since the
+       * finalization happens now in the per neighbour computation
+       */
+      template <typename Coeffs>
+      void finalize_coefficients(Coeffs & /*coefficients*/) {}
+
+      template <int NDims, typename Coeffs>
+      void
+      finalize_neighbour_derivative(Coeffs & /*coefficients_neigh_gradient*/) {}
+
+     protected:
+      Matrix_Ref compute_neighbour_contribution(const double distance,
+                                                int neighbour_type) {
+        Parent::compute_neighbour_contribution(distance, this->fac_a);
+        Parent::finalize_radial_integral_neighbour();
+        for (size_t angular_l{0}; angular_l < this->max_angular + 1;
+             ++angular_l) {
+          this->reduced_radial_integral_neighbour.col(angular_l) =
+              this->projection_matrices.at(neighbour_type).at(angular_l) *
+              this->radial_integral_neighbour.col(angular_l);
+        }
+        return Matrix_Ref(this->reduced_radial_integral_neighbour);
+      }
+
+      void precompute_fac_a() {
+        auto smearing{downcast_atomic_smearing<AtomicSmearingType::Constant>(
+            this->atomic_smearing)};
+        this->fac_a = 0.5 * pow(smearing->get_gaussian_sigma(), -2);
+      }
+
+      // Should be invoked only after the a-factor has been precomputed
+      void precompute_center_contribution() {
+        Parent::compute_center_contribution(this->fac_a);
+        Parent::finalize_radial_integral_center();
+        int species;
+        // Vector_t reduced_radial_integral_center;
+        // for (auto species_projection_matrices : this->projection_matrices) {
+        for (auto it = this->projection_matrices.begin();
+             it != this->projection_matrices.end(); ++it) {
+          species = it->first;
+          // use projection matrix at l = 0
+          this->reduced_radial_integral_centers.insert(std::pair<int, Vector_t>(
+              species, it->second.at(0) * this->radial_integral_center));
+        }
+      }
+
+      void init_interpolator(const Hypers_t & hypers) {
+        auto radial_contribution_hypers =
+            hypers.at("radial_contribution").template get<json>();
+        auto optimization_hypers =
+            radial_contribution_hypers.at("optimization").template get<json>();
+
+        double accuracy{this->get_interpolator_accuracy(optimization_hypers)};
+        // minimal distance such that it is still stable with the interpolated
+        // function
+        double range_begin{math::SPHERICAL_BESSEL_FUNCTION_FTOL};
+        double range_end{this->interaction_cutoff};
+        this->init_interpolator(range_begin, range_end, accuracy);
+      }
+
+      void init_interpolator(const double range_begin, const double range_end,
+                             const double accuracy) {
+        int species;
+        for (auto it = projection_matrices.begin();
+             it != projection_matrices.end(); ++it) {
+          species = it->first;
+          // "this" is passed by reference and is mutable
+          std::function<Matrix_t(double)> func{
+              [&](const double distance) mutable {
+                this->compute_neighbour_contribution(distance, species);
+                return this->radial_integral_neighbour;
+              }};
+          Matrix_t result = func(range_begin);
+          int cols{static_cast<int>(result.cols())};
+          int rows{static_cast<int>(result.rows())};
+          this->intps.insert(std::pair<int, std::unique_ptr<Spline_t>>(
+              species, std::make_unique<Spline_t>(func, range_begin, range_end,
+                                                  accuracy, cols, rows)));
+        }
+      }
+
+      double get_interpolator_accuracy(const Hypers_t & optimization_hypers) {
+        auto spline_hypers =
+            optimization_hypers.at("Spline").template get<json>();
+        if (spline_hypers.count("accuracy")) {
+          return spline_hypers.at("accuracy").template get<double>();
+        } else {
+          std::stringstream err_str{};
+          err_str << "No Spline accuracy was given.";
+          throw std::logic_error(err_str.str());
+        }
+      }
+
+      double get_cutoff(const Hypers_t & hypers) {
+        auto fc_hypers = hypers.at("cutoff_function").template get<json>();
+        return fc_hypers.at("cutoff").at("value").template get<double>();
+      }
+
+      Matrix_t reduced_radial_integral_neighbour{};
+      Matrix_t reduced_radial_neighbour_derivative{};
+      std::map<int, Vector_t> reduced_radial_integral_centers{};
+      std::map<int, std::vector<Matrix_t>> projection_matrices{};
+      size_t n_components{};
+      size_t n_species{};
+      // 1/(2σ^2)
+      double fac_a{};
+      std::map<int, std::unique_ptr<Spline_t>> intps{};
     };
 
   }  // namespace internal
@@ -1292,14 +1933,19 @@ namespace rascal {
                                ": \'GTO\' or \'DVR\'. ");
       }
 
-      if (radial_contribution_hypers.find("optimization") !=
-          radial_contribution_hypers.end()) {
+      if (radial_contribution_hypers.count("optimization")) {
         auto optimization_hypers =
             radial_contribution_hypers.at("optimization").get<json>();
         // Checks for all optimization args used for the computation of the
         // spherical expansion
-        if (optimization_hypers.find("Spline") != optimization_hypers.end()) {
+        if (optimization_hypers.count("Spline") &&
+            optimization_hypers.count("RadialDimReduction")) {
+          this->optimization_type = OptimizationType::RadialDimReductionSpline;
+
+        } else if (optimization_hypers.count("Spline")) {
           this->optimization_type = OptimizationType::Spline;
+        } else if (optimization_hypers.count("RadialDimReduction")) {
+          this->optimization_type = OptimizationType::RadialDimReduction;
         } else {
           this->optimization_type = OptimizationType::None;
         }
@@ -1603,11 +2249,24 @@ namespace rascal {
         this->radial_integral = rc_shared;
         break;
       }
+      case (OptimizationType::RadialDimReduction): {
+        auto rc_shared = std::make_shared<internal::RadialContributionHandler<
+            RadialType, AST, OptimizationType::RadialDimReduction>>(hypers);
+        this->radial_integral = rc_shared;
+        break;
+      }
+      case (OptimizationType::RadialDimReductionSpline): {
+        auto rc_shared = std::make_shared<internal::RadialContributionHandler<
+            RadialType, AST, OptimizationType::RadialDimReductionSpline>>(
+            hypers);
+        this->radial_integral = rc_shared;
+        break;
+      }
       default:
         std::basic_ostringstream<char> err_message;
         err_message << "Invalid optimization type == ";
         err_message << static_cast<int>(this->optimization_type);
-        err_message << ")" << std::endl;
+        err_message << "(C++ side)" << std::endl;
         throw std::logic_error(err_message.str());
       }
     }
@@ -1701,11 +2360,21 @@ namespace rascal {
                          OptimizationType::Spline>(managers);
       break;
     }
+    case (OptimizationType::RadialDimReduction): {
+      this->compute_loop<FcType, RadialType, SmearingType,
+                         OptimizationType::RadialDimReduction>(managers);
+      break;
+    }
+    case (OptimizationType::RadialDimReductionSpline): {
+      this->compute_loop<FcType, RadialType, SmearingType,
+                         OptimizationType::RadialDimReductionSpline>(managers);
+      break;
+    }
     default:
       std::basic_ostringstream<char> err_message;
       err_message << "Invalid optimization type == ";
       err_message << static_cast<int>(this->optimization_type);
-      err_message << ")" << std::endl;
+      err_message << "(C++ side)" << std::endl;
       throw std::logic_error(err_message.str());
     }
   }
@@ -1780,7 +2449,6 @@ namespace rascal {
     auto radial_integral{
         downcast_radial_integral_handler<RadialType, SmearingType, OptType>(
             this->radial_integral)};
-
     auto n_row{this->max_radial};
     // to store linearly all l,m components with
     // -l-1<=m<=l+1 needs (l+1)**2 elements
@@ -1821,8 +2489,26 @@ namespace rascal {
 
       // Start the accumulation with the central atom contribution
       coefficients_center[center_type].col(0) +=
-          radial_integral->template compute_center_contribution(center) /
+          radial_integral->template compute_center_contribution(
+              center, center.get_atom_type()) /
           sqrt(4.0 * PI);
+
+      // TODO(alex) fix gradient for GTO
+      // auto center_pair{center.get_atom_ii()};
+      //
+      // if (compute_gradients) {
+      //  coefficients_center_gradient =
+      // coefficients_center_gradient =
+      // do I need gradient_center_by_type? no!
+      //  auto center_pair{*center.pairs_with_self_pair().begin()};
+      //  auto &
+      //  coefficients_center_pair_gradient{expansions_coefficients_gradient[center_pair]};
+      //  auto && neighbour_contribution =
+      //      radial_integral->template compute_neighbour_contribution(
+      //          dist, neigh, neigh.get_atom_type());
+      //  radial_integral->template compute_center_pair_derivative(dist, neigh,
+      //  neigh.get_atom_type());
+      //}
 
       for (auto neigh : center.pairs()) {
         auto atom_j = neigh.get_atom_j();
@@ -1837,8 +2523,8 @@ namespace rascal {
         auto && harmonics_gradients{
             spherical_harmonics.get_harmonics_derivatives()};
         auto && neighbour_contribution =
-            radial_integral->template compute_neighbour_contribution(dist,
-                                                                     neigh);
+            radial_integral->template compute_neighbour_contribution(
+                dist, neigh, neigh.get_atom_type());
         double f_c{cutoff_function->f_c(dist)};
         auto coefficients_center_by_type{coefficients_center[neigh_type]};
 
@@ -1847,7 +2533,7 @@ namespace rascal {
         for (size_t angular_l{0}; angular_l < this->max_angular + 1;
              ++angular_l) {
           size_t l_block_size{2 * angular_l + 1};
-          c_ij_nlm.block(0, l_block_idx, max_radial, l_block_size) =
+          c_ij_nlm.block(0, l_block_idx, this->max_radial, l_block_size) =
               neighbour_contribution.col(angular_l) *
               harmonics.segment(l_block_idx, l_block_size);
           l_block_idx += l_block_size;
@@ -1866,10 +2552,10 @@ namespace rascal {
             for (size_t angular_l{0}; angular_l < this->max_angular + 1;
                  ++angular_l) {
               size_t l_block_size{2 * angular_l + 1};
-              coefficients_neigh_by_type.block(0, l_block_idx, max_radial,
+              coefficients_neigh_by_type.block(0, l_block_idx, this->max_radial,
                                                l_block_size) +=
-                  parity *
-                  c_ij_nlm.block(0, l_block_idx, max_radial, l_block_size);
+                  parity * c_ij_nlm.block(0, l_block_idx, this->max_radial,
+                                          l_block_size);
               l_block_idx += l_block_size;
               parity *= -1.;
             }
@@ -1887,7 +2573,8 @@ namespace rascal {
               expansions_coefficients_gradient[neigh];
 
           auto && neighbour_derivative =
-              radial_integral->compute_neighbour_derivative(dist, neigh);
+              radial_integral->compute_neighbour_derivative(
+                  dist, neigh, neigh.get_atom_type());
           double df_c{cutoff_function->df_c(dist)};
           // The type of the contribution c^{ij} to the coefficient c^{i}
           // depends on the type of j (and it is the same for the gradients)
@@ -1981,8 +2668,17 @@ namespace rascal {
       // Normalize and orthogonalize the radial coefficients
       radial_integral->finalize_coefficients(coefficients_center);
       if (compute_gradients) {
-        radial_integral->template finalize_coefficients_der<ThreeD>(
-            expansions_coefficients_gradient, center);
+        auto center_pair{center.get_atom_ii()};
+        auto & coefficients_center_pair_gradient{
+            expansions_coefficients_gradient[center_pair]};
+        radial_integral->template finalize_neighbour_derivative<ThreeD>(
+            coefficients_center_pair_gradient);
+        for (auto neigh : center.pairs()) {
+          auto & coefficients_neigh_gradient{
+              expansions_coefficients_gradient[neigh]};
+          radial_integral->template finalize_neighbour_derivative<ThreeD>(
+              coefficients_neigh_gradient);
+        }  // for (neigh : center)
       }
     }  // for (center : manager)
   }    // compute()

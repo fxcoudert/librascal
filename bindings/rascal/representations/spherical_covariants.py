@@ -166,7 +166,8 @@ class SphericalCovariants(BaseIO):
         optimization = deepcopy(optimization)
         # check supported optimization keys
         # TODO make global
-        supported_optimization = ["Spline"]
+        supported_optimization = ["Spline", "RadialDimReduction"]
+        # TODO check if RadialDimRedcution has projection_matrices
         for key in optimization.keys():
             if key not in supported_optimization:
                 print(f"Warning: Optimization argument {key} is not supported and therefore ignored.")

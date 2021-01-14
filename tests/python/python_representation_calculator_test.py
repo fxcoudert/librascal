@@ -10,7 +10,8 @@ import numpy as np
 import sys
 import os
 import json
-from copy import copy
+from copy import copy, deepcopy
+from scipy.stats import ortho_group
 
 rascal_reference_path = "reference_data"
 inputs_path = os.path.join(rascal_reference_path, "inputs")
@@ -62,30 +63,36 @@ class TestSphericalExpansionRepresentation(unittest.TestCase):
         builds the test case. Test the order=1 structure manager implementation
         against a triclinic crystal.
         """
+        self.seed = 18012021
 
         fns = [
             os.path.join(inputs_path, "CaCrP2O7_mvc-11955_symmetrized.json"),
             os.path.join(inputs_path, "SiC_moissanite_supercell.json"),
             os.path.join(inputs_path, "methane.json"),
         ]
+        self.species = [1, 6, 8, 14, 15, 20, 24]
         self.frames = [load_json_frame(fn) for fn in fns]
+
+        self.max_radial = 6
+        self.max_angular = 4
 
         self.hypers = {
             "interaction_cutoff": 6.0,
             "cutoff_smooth_width": 1.0,
-            "max_radial": 10,
-            "max_angular": 8,
+            "max_radial": self.max_radial,
+            "max_angular": self.max_angular,
             "gaussian_sigma_type": "Constant",
             "gaussian_sigma_constant": 0.5,
+            "expansion_by_species_method": "user defined",
+            "global_species": self.species,
         }
 
     def test_representation_transform(self):
-
         rep = SphericalExpansion(**self.hypers)
 
         features = rep.transform(self.frames)
 
-        test = features.get_features(rep)
+        ref = features.get_features(rep)
 
     def test_serialization(self):
         rep = SphericalExpansion(**self.hypers)
@@ -97,6 +104,42 @@ class TestSphericalExpansionRepresentation(unittest.TestCase):
         rep_copy_dict = to_dict(rep_copy)
 
         self.assertTrue(rep_dict == rep_copy_dict)
+
+    def test_radial_dimension_reduction_test(self):
+        rep = SphericalExpansion(**self.hypers)
+        features_ref = rep.transform(self.frames).get_features(rep)
+        K_ref = features_ref.dot(features_ref.T)
+
+        # identity test
+        hypers = deepcopy(self.hypers)
+        projection_matrices = [
+            np.eye(self.max_radial).tolist() for _ in range(self.max_angular + 1)
+        ]
+        hypers["optimization"] = {
+            "RadialDimReduction": {
+                "projection_matrices": {sp: projection_matrices for sp in self.species}
+            }
+        }
+        rep = SphericalExpansion(**hypers)
+        features_test = rep.transform(self.frames).get_features(rep)
+        self.assertTrue(np.allclose(features_ref, features_test))
+
+        # random orthogonal matrix test, orthogonal matrix should be recoverable by linear regression
+        hypers = deepcopy(self.hypers)
+        np.random.seed(self.seed)
+        projection_matrices = [
+            ortho_group.rvs(self.max_radial).tolist()
+            for _ in range(self.max_angular + 1)
+        ]
+        hypers["optimization"] = {
+            "RadialDimReduction": {
+                "projection_matrices": {sp: projection_matrices for sp in self.species}
+            }
+        }
+        rep = SphericalExpansion(**hypers)
+        features_test = rep.transform(self.frames).get_features(rep)
+        K_test = features_test.dot(features_test.T)
+        self.assertTrue(np.allclose(K_ref, K_test))
 
 
 class TestSphericalInvariantsRepresentation(unittest.TestCase):

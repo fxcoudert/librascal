@@ -10,7 +10,6 @@ def compute_relative_error(
     relative_error[non_zero_idx] /= reference_values[non_zero_idx]
     return np.abs(relative_error)
 
-
 def intersection(X, Y=None):
     if Y is None:
         return list(X.keys())

@@ -504,6 +504,16 @@ namespace rascal {
                                    internal::RadialBasisType::GTO,
                                    internal::AtomicSmearingType::Constant,
                                    internal::OptimizationType::Spline>,
+      // TODO(alex) GTO derivative still requires some help see
+      // `compute_neighbour_derivative` function
+      // RadialIntegralHandlerFixture<MultipleHypersSphericalExpansion,
+      //                             internal::RadialBasisType::GTO,
+      //                             internal::AtomicSmearingType::Constant,
+      //                             internal::OptimizationType::RadialDimReduction>,
+      RadialIntegralHandlerFixture<
+          MultipleHypersSphericalExpansion, internal::RadialBasisType::GTO,
+          internal::AtomicSmearingType::Constant,
+          internal::OptimizationType::RadialDimReductionSpline>,
       RadialIntegralHandlerFixture<MultipleHypersSphericalExpansion,
                                    internal::RadialBasisType::DVR,
                                    internal::AtomicSmearingType::Constant,
@@ -511,7 +521,15 @@ namespace rascal {
       RadialIntegralHandlerFixture<MultipleHypersSphericalExpansion,
                                    internal::RadialBasisType::DVR,
                                    internal::AtomicSmearingType::Constant,
-                                   internal::OptimizationType::Spline>>;
+                                   internal::OptimizationType::Spline>,
+      RadialIntegralHandlerFixture<
+          MultipleHypersSphericalExpansion, internal::RadialBasisType::DVR,
+          internal::AtomicSmearingType::Constant,
+          internal::OptimizationType::RadialDimReduction>,
+      RadialIntegralHandlerFixture<
+          MultipleHypersSphericalExpansion, internal::RadialBasisType::DVR,
+          internal::AtomicSmearingType::Constant,
+          internal::OptimizationType::RadialDimReductionSpline>>;
 
   /**
    * Test the derivative of the GTO radial integral in the SphericalExpansion
