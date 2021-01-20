@@ -195,7 +195,9 @@ class SphericalExpansion(BaseIO):
         supported_optimization = ["Spline", "RadialDimReduction"]
         for key in optimization.keys():
             if key not in supported_optimization:
-                print(f"Warning: Optimization argument {key} is not supported and therefore ignored.")
+                print(
+                    f"Warning: Optimization argument {key} is not supported and therefore ignored."
+                )
         if "Spline" in optimization:
             if "accuracy" not in optimization["Spline"]:
                 accuracy = 1e-8
@@ -308,7 +310,7 @@ class SphericalExpansion(BaseIO):
             gaussian_sigma_constant=gaussian_density["gaussian_sigma"]["value"],
             cutoff_function_type=cutoff_function["type"],
             radial_basis=radial_contribution["type"],
-            optimization=radial_contribution['optimization'],
+            optimization=radial_contribution["optimization"],
             cutoff_function_parameters=self.cutoff_function_parameters,
         )
         return init_params

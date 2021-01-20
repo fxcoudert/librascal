@@ -59,7 +59,7 @@ def dump_reference_json():
         os.path.join(read_inputs_path, "CaCrP2O7_mvc-11955_symmetrized.json"),
         os.path.join(read_inputs_path, "small_molecule.json"),
     ]
-    
+
     optimization = [
         dict(),
         dict(Spline=dict(accuracy=1e-8)),

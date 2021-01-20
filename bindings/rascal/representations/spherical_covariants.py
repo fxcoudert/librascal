@@ -170,7 +170,9 @@ class SphericalCovariants(BaseIO):
         # TODO check if RadialDimRedcution has projection_matrices
         for key in optimization.keys():
             if key not in supported_optimization:
-                print(f"Warning: Optimization argument {key} is not supported and therefore ignored.")
+                print(
+                    f"Warning: Optimization argument {key} is not supported and therefore ignored."
+                )
         if "Spline" in optimization:
             if "accuracy" not in optimization["Spline"]:
                 accuracy = 1e-8
