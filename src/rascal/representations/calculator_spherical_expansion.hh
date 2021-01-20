@@ -805,7 +805,7 @@ namespace rascal {
 
       // initialize Eigen matrices/vectors, contains both
       // precomputed quantities and actual expansion coefficients
-      void init_matrices() {
+      void init_matrices() override {
         this->legendre_radial_factor.resize(this->max_radial);
         this->legendre_points.resize(this->max_radial);
 
@@ -1322,7 +1322,7 @@ namespace rascal {
         this->precompute_center_contribution();
       }
 
-      void init_matrices() {
+      void init_matrices() override {
         this->reduced_radial_integral_neighbour.resize(this->n_components,
                                                        this->max_angular + 1);
         this->reduced_radial_integral_neighbour.setZero();
@@ -1584,7 +1584,7 @@ namespace rascal {
         this->precompute_center_contribution();
       }
 
-      void init_matrices() {
+      void init_matrices() override {
         this->reduced_radial_integral_neighbour.resize(this->n_components,
                                                        this->max_angular + 1);
         this->reduced_radial_integral_neighbour.setZero();
