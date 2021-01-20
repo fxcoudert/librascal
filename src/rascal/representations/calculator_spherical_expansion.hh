@@ -994,7 +994,7 @@ namespace rascal {
       }
 
      protected:
-      void precompute() {
+      void precompute() override {
         Parent::precompute();
         this->precompute_fac_a();
         this->precompute_center_contribution();
@@ -1316,7 +1316,7 @@ namespace rascal {
         Parent::init_matrices();
       }
 
-      void precompute() {
+      void precompute() override {
         Parent::precompute();
         this->precompute_fac_a();
         this->precompute_center_contribution();
@@ -1578,7 +1578,7 @@ namespace rascal {
         Parent::init_matrices();
       }
 
-      void precompute() {
+      void precompute() override {
         Parent::precompute();
         this->precompute_fac_a();
         this->precompute_center_contribution();
