@@ -1180,7 +1180,7 @@ namespace rascal {
         this->precompute();
       }
 
-      void set_hyperparameters(const Hypers_t & hypers) {
+      void set_hyperparameters(const Hypers_t & hypers) override {
         auto radial_contribution_hypers =
             hypers.at("radial_contribution").template get<json>();
         auto optimization_hypers =
@@ -1442,7 +1442,7 @@ namespace rascal {
         this->init_interpolator(hypers);
       }
 
-      void set_hyperparameters(const Hypers_t & hypers) {
+      void set_hyperparameters(const Hypers_t & hypers) override {
         auto radial_contribution_hypers =
             hypers.at("radial_contribution").template get<json>();
         auto optimization_hypers =
