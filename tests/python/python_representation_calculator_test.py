@@ -141,6 +141,44 @@ class TestSphericalExpansionRepresentation(unittest.TestCase):
         K_test = features_test.dot(features_test.T)
         self.assertTrue(np.allclose(K_ref, K_test))
 
+    def test_radial_dimension_reduction_spline_test(self):
+        rep = SphericalExpansion(**self.hypers)
+        features_ref = rep.transform(self.frames).get_features(rep)
+        K_ref = features_ref.dot(features_ref.T)
+
+        # identity test
+        hypers = deepcopy(self.hypers)
+        projection_matrices = [
+            np.eye(self.max_radial).tolist() for _ in range(self.max_angular + 1)
+        ]
+        hypers["optimization"] = {
+            "RadialDimReduction": {
+                "projection_matrices": {sp: projection_matrices for sp in self.species}
+            },
+            "Spline": {"accuracy": 1e-8}
+        }
+        rep = SphericalExpansion(**hypers)
+        features_test = rep.transform(self.frames).get_features(rep)
+        self.assertTrue(np.allclose(features_ref, features_test))
+
+        # random orthogonal matrix test, orthogonal matrix should be recoverable by linear regression
+        hypers = deepcopy(self.hypers)
+        np.random.seed(self.seed)
+        projection_matrices = [
+            ortho_group.rvs(self.max_radial).tolist()
+            for _ in range(self.max_angular + 1)
+        ]
+        hypers["optimization"] = {
+            "RadialDimReduction": {
+                "projection_matrices": {sp: projection_matrices for sp in self.species}
+            },
+            "Spline": {"accuracy": 1e-8}
+        }
+        rep = SphericalExpansion(**hypers)
+        features_test = rep.transform(self.frames).get_features(rep)
+        K_test = features_test.dot(features_test.T)
+        self.assertTrue(np.allclose(K_ref, K_test))
+
 
 class TestSphericalInvariantsRepresentation(unittest.TestCase):
     def setUp(self):

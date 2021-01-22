@@ -1171,8 +1171,6 @@ namespace rascal {
       using Vector_Ref = typename Parent::Vector_Ref;
       using Matrix_t = math::Matrix_t;
       using Vector_t = math::Vector_t;
-      using Spline_t = math::InterpolatorMatrixUniformCubicSpline<
-          math::RefinementMethod_t::Exponential>;
 
       explicit RadialContributionHandler(const Hypers_t & hypers)
           : Parent(hypers) {
@@ -1620,7 +1618,8 @@ namespace rascal {
             this->intps.at(neighbour_type)->interpolate_derivative(distance);
         return Matrix_Ref(this->radial_neighbour_derivative);
       }
-      ///////////////////////
+      /////////////////////// TODO(alex) delete this block if not needed for
+      //derivative
 
       // template <size_t Order, size_t Layer>
       // Matrix_Ref
@@ -1709,7 +1708,7 @@ namespace rascal {
           std::function<Matrix_t(double)> func{
               [&](const double distance) mutable {
                 this->compute_neighbour_contribution(distance, species);
-                return this->radial_integral_neighbour;
+                return this->reduced_radial_integral_neighbour;
               }};
           Matrix_t result = func(range_begin);
           int cols{static_cast<int>(result.cols())};
