@@ -591,14 +591,17 @@ namespace rascal {
             this->ortho_norm_matrix.transpose() * this->radial_integral_center;
       }
 
-      // Can be used after `compute_neighbour_contribution` to finalize the
-      // coefficients within the neighbour loop
+      /**
+       * Orthonormalize the radial integral computed with
+       * `compute_neighbour_contribution` within the neighbour loop
+       * It is useful for splining the GTO basis.
+       */
       void finalize_radial_integral_neighbour() {
         this->radial_integral_neighbour = this->ortho_norm_matrix.transpose() *
                                           this->radial_integral_neighbour;
       }
 
-      // used within the computation of the sperical expanison to apply global
+      // used within the computation of the spherical expansison to apply global
       // operations after the neighbour loop
       template <typename Coeffs>
       void finalize_coefficients(Coeffs & coefficients) const {
@@ -1193,7 +1196,7 @@ namespace rascal {
                       std::vector<std::vector<std::vector<double>>>>>();
           // TODO(alex) for now I assume the correct species are given,
           // because I don't know where to get a species list,
-          // but this can cause an access error by the block sparse porperty.
+          // but this can cause an access error by the block sparse property.
           this->n_species = json_projection_matrices.size();
           this->n_components = this->max_radial;
 
@@ -1455,7 +1458,7 @@ namespace rascal {
                       std::vector<std::vector<std::vector<double>>>>>();
           // TODO(alex) for now I assume the correct species are given,
           // because I don't know where to get a species list,
-          // but this can cause an access error by the block sparse porperty.
+          // but this can cause an access error by the block sparse property.
           this->n_species = json_projection_matrices.size();
           this->n_components = this->max_radial;
 
@@ -1618,24 +1621,6 @@ namespace rascal {
             this->intps.at(neighbour_type)->interpolate_derivative(distance);
         return Matrix_Ref(this->radial_neighbour_derivative);
       }
-      /////////////////////// TODO(alex) delete this block if not needed for
-      //derivative
-
-      // template <size_t Order, size_t Layer>
-      // Matrix_Ref
-      // compute_neighbour_derivative(const double distance,
-      //                             const ClusterRefKey<Order, Layer> & pair,
-      //                             int neighbour_type) {
-      //  Parent::compute_neighbour_derivative(distance, pair, neighbour_type);
-      //  Parent::finalize_neighbour_derivative();
-      //  for (size_t angular_l{0}; angular_l < this->max_angular + 1;
-      //       ++angular_l) {
-      //    this->reduced_radial_neighbour_derivative.col(angular_l) =
-      //        this->projection_matrices.at(neighbour_type).at(angular_l) *
-      //        this->radial_neighbour_derivative.col(angular_l);
-      //  }
-      //  return Matrix_Ref(this->reduced_radial_neighbour_derivative);
-      //}
 
       /*
        * Overwriting the finalization function to empty one, since the
