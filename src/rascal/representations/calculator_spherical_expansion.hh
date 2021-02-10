@@ -1618,24 +1618,7 @@ namespace rascal {
             this->intps.at(neighbour_type)->interpolate_derivative(distance);
         return Matrix_Ref(this->radial_neighbour_derivative);
       }
-      /////////////////////// TODO(alex) delete this block if not needed for
-      //derivative
 
-      // template <size_t Order, size_t Layer>
-      // Matrix_Ref
-      // compute_neighbour_derivative(const double distance,
-      //                             const ClusterRefKey<Order, Layer> & pair,
-      //                             int neighbour_type) {
-      //  Parent::compute_neighbour_derivative(distance, pair, neighbour_type);
-      //  Parent::finalize_neighbour_derivative();
-      //  for (size_t angular_l{0}; angular_l < this->max_angular + 1;
-      //       ++angular_l) {
-      //    this->reduced_radial_neighbour_derivative.col(angular_l) =
-      //        this->projection_matrices.at(neighbour_type).at(angular_l) *
-      //        this->radial_neighbour_derivative.col(angular_l);
-      //  }
-      //  return Matrix_Ref(this->reduced_radial_neighbour_derivative);
-      //}
 
       /*
        * Overwriting the finalization function to empty one, since the
