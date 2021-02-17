@@ -5,7 +5,6 @@ import argparse
 import ase.io
 import ase.units
 import numpy as np
-from copy import deepcopy
 from rascal.models.IP_ipi_interface import IPICalculator as IPICalc
 
 description = """

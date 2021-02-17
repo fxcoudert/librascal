@@ -44,8 +44,7 @@ class IPICalculator(BaseIO):
         self.representation = self.model.get_representation_calculator()
         self.template_filename = structure_template
         self.atoms = ase.io.read(structure_template)
-        # Assume PBC is on
-        # TODO how does i-PI tell us that we're running a non-periodic simulation?
+        # i-Pi assumes PBC is on
         self.atoms.pbc = True
         self.manager = None
         self.matrix_indices_in_voigt_notation = [
