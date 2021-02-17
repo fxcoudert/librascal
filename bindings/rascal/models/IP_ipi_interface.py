@@ -22,11 +22,9 @@ class IPICalculator(BaseIO):
     implemented_properties = ["energy", "forces", "stress"]
     "Properties calculator can handle (energy, forces, ...)"
 
-    # I don't think this is needed...
     default_parameters = {}
     "Default parameters"
 
-    # Is this something required by ASE...? If so, take it out.
     nolabel = True
 
     def __init__(self, model_json, structure_template):
