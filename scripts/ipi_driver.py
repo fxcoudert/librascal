@@ -103,7 +103,7 @@ def driver(unix=False, address="", port=12345, model = "", struct_templ = "", dr
 	vir = np.zeros((3, 3), float)
 	while True:  # ah the infinite loop!
 		header = sock.recv(HDRLEN)
-		
+
 		if header == Message("STATUS"):
 			# responds to a status request
 			if not f_init:
@@ -159,7 +159,7 @@ if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description=description)
 
 	parser.add_argument(
-	"-u",	
+	"-u",
 	"--unix",
 	action="store_true",
 	default=False,
@@ -193,7 +193,7 @@ if __name__ == "__main__":
 	default="",
 	help="Filename for an ASE-compatible Atoms object, used only to initialize atom types and numbers",
 	)
-	
+
 	args = parser.parse_args()
 	print(args)
 	driver(unix=args.unix, address=args.address, port=args.port, model=args.model, struct_templ = args.struct_templ, driver=rascal_driver)

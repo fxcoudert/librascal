@@ -1,9 +1,13 @@
-from ..utils import BaseIO
+from ..utils import BaseIO, is_notebook
 from ..lib import compute_sparse_kernel_gradients, compute_sparse_kernel_neg_stress
 
 import numpy as np
 import ase
 
+if is_notebook():
+    from tqdm.notebook import tqdm
+else:
+    from tqdm import tqdm
 
 class KRR(BaseIO):
     """Kernel Ridge Regression model. Only supports sparse GPR
@@ -218,12 +222,13 @@ def compute(i_frame,frame,representation,X_sparse,kernel):
 def compute_KNM(frames,X_sparse,kernel,soap):
     Nstructures,Ngrads,Ngrad_stride = get_strides(frames)
     KNM = np.zeros((Nstructures+Ngrads, X_sparse.size()))
-    # pbar = tqdm(frames,desc='kernel',leave=False)
+    pbar = tqdm(frames,desc='compute KNM',leave=False)
     for i_frame,frame in enumerate(frames):
         en_row, grad_rows = compute(i_frame,frame,soap,X_sparse,kernel)
         KNM[Ngrad_stride[i_frame]:Ngrad_stride[i_frame+1]] = grad_rows
         KNM[i_frame] = en_row
-        # pbar.update()
+        pbar.update()
+    pbar.close()
     return KNM
 
 def train_gap_model(
