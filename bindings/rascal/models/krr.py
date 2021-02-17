@@ -9,6 +9,7 @@ if is_notebook():
 else:
     from tqdm import tqdm
 
+
 class KRR(BaseIO):
     """Kernel Ridge Regression model. Only supports sparse GPR
     training for the moment.
@@ -202,34 +203,38 @@ class KRR(BaseIO):
     def get_representation_calculator(self):
         return self.kernel._rep
 
+
 def get_strides(frames):
     Nstructures = len(frames)
     Ngrad_stride = [0]
     Ngrads = 0
     for frame in frames:
         n_at = len(frame)
-        Ngrad_stride.append(n_at*3)
-        Ngrads += n_at*3
+        Ngrad_stride.append(n_at * 3)
+        Ngrads += n_at * 3
     Ngrad_stride = np.cumsum(Ngrad_stride) + Nstructures
-    return Nstructures,Ngrads,Ngrad_stride
+    return Nstructures, Ngrads, Ngrad_stride
 
-def compute(i_frame,frame,representation,X_sparse,kernel):
+
+def compute(i_frame, frame, representation, X_sparse, kernel):
     feat = representation.transform([frame])
     en_row = kernel(feat, X_sparse)
     grad_rows = kernel(feat, X_sparse, grad=(True, False))
     return en_row, grad_rows
 
-def compute_KNM(frames,X_sparse,kernel,soap):
-    Nstructures,Ngrads,Ngrad_stride = get_strides(frames)
-    KNM = np.zeros((Nstructures+Ngrads, X_sparse.size()))
-    pbar = tqdm(frames,desc='compute KNM',leave=False)
-    for i_frame,frame in enumerate(frames):
-        en_row, grad_rows = compute(i_frame,frame,soap,X_sparse,kernel)
-        KNM[Ngrad_stride[i_frame]:Ngrad_stride[i_frame+1]] = grad_rows
+
+def compute_KNM(frames, X_sparse, kernel, soap):
+    Nstructures, Ngrads, Ngrad_stride = get_strides(frames)
+    KNM = np.zeros((Nstructures + Ngrads, X_sparse.size()))
+    pbar = tqdm(frames, desc="compute KNM", leave=False)
+    for i_frame, frame in enumerate(frames):
+        en_row, grad_rows = compute(i_frame, frame, soap, X_sparse, kernel)
+        KNM[Ngrad_stride[i_frame] : Ngrad_stride[i_frame + 1]] = grad_rows
         KNM[i_frame] = en_row
         pbar.update()
     pbar.close()
     return KNM
+
 
 def train_gap_model(
     kernel,
