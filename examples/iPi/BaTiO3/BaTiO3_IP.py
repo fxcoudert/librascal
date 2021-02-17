@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from matplotlib import pylab as plt
 
 import os, sys
@@ -5,7 +7,6 @@ from ase.io import read
 
 import sys
 import time
-import rascal
 import json
 
 import ase
@@ -18,8 +19,8 @@ from time import time
 
 import json
 
-from rascal.representations import SphericalInvariants
 from rascal.models import Kernel, sparse_points, train_gap_model, compute_KNM
+from rascal.representations import SphericalInvariants
 from rascal.neighbourlist import AtomsList
 from rascal.utils import from_dict, to_dict, CURFilter, dump_obj, load_obj
 
