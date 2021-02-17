@@ -9,7 +9,6 @@ RASCAL_DRIVER="../../../scripts/ipi_driver.py"
 # i-Pi executable
 IPI="i-pi"
 
-#At this point comes the MD job described previously
 # initialize the socket and set up the simulation
 $IPI input.xml &
 sleep 2
