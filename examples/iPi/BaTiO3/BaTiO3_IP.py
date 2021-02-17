@@ -1,4 +1,3 @@
-%matplotlib inline
 from matplotlib import pylab as plt
 
 import os, sys
@@ -14,15 +13,13 @@ from ase.io import read, write
 from ase.build import make_supercell
 from ase.visualize import view
 import numpy as np
-from tqdm.notebook import tqdm
 
 from time import time
 
 import json
 
 from rascal.representations import SphericalInvariants
-from rascal.models import Kernel, sparse_points, train_gap_model, krr
-from rascal.models.krr import compute_KNM
+from rascal.models import Kernel, sparse_points, train_gap_model, compute_KNM
 from rascal.neighbourlist import AtomsList
 from rascal.utils import from_dict, to_dict, CURFilter, dump_obj, load_obj
 
@@ -78,9 +75,9 @@ energy_baseline = {np.int(species): atom_energy_baseline for species in global_s
 
 # define the parameters of the spherical expansion
 hypers = dict(soap_type="PowerSpectrum",
-              interaction_cutoff=5.5, 
-              max_radial=8, 
-              max_angular=6, 
+              interaction_cutoff=5.5,
+              max_radial=8,
+              max_angular=6,
               gaussian_sigma_constant=0.5,
               gaussian_sigma_type="Constant",
               cutoff_function_type="RadialScaling",
@@ -94,8 +91,8 @@ hypers = dict(soap_type="PowerSpectrum",
               radial_basis="GTO",
               optimization_args=
                     dict(
-                            type="Spline",                                            
-                            accuracy=1.0e-05                        
+                            type="Spline",
+                            accuracy=1.0e-05
                         ),
               normalize=True,
               compute_gradients=False
@@ -124,11 +121,12 @@ zeta = 4
 start = time()
 hypers['compute_gradients'] = True
 soap = SphericalInvariants(**hypers)
-kernel = Kernel(soap, name='GAP', zeta=zeta, target_type='Structure', kernel_type='Sparse')
+kernel = Kernel(soap, name='GAP', zeta=zeta,
+                target_type='Structure', kernel_type='Sparse')
 
 KNM = compute_KNM(frames_train, X_sparse, kernel, soap)
 
-model = train_gap_model(kernel, frames_train, KNM, X_sparse, y_train, energy_baseline, 
+model = train_gap_model(kernel, frames_train, KNM, X_sparse, y_train, energy_baseline,
                         grad_train=-f_train, lambdas=[1e-12, 1e-12], jitter=1e-13)
 
 # save the model to a file in json format for future use
